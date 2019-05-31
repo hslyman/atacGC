@@ -1,0 +1,530 @@
+---
+title: 'Chromatin State Bias Statistics'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+```{r}
+library(reshape2)
+library(ggplot2)
+library(RColorBrewer)
+library(vcd)
+```
+
+##TSS enrichment plots
+```{r}
+tss_enrichment <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/Lib08_L468_TSS_cov.txt",
+                             sep = "\t",
+                             header = TRUE)
+
+melted_tss <- melt(tss_enrichment, id.vars = c("position"), variable.name = "Library", value.name = "coverage")
+
+ggplot(data = melted_tss, aes(x = position, y = coverage, group = Library, color = Library)) +
+  geom_path() +
+  scale_color_brewer(palette = "Set1") +
+  labs(x = "TSS", y = "normalized ATAC-seq coverage")
+```
+
+
+##Human cell line data (continuous)
+```{r}
+hg_cont <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/hg38_gc_fpkm_atac_continuous.txt", sep = "\t", header = TRUE)
+
+hg_cont$meanFPKM <- (hg_cont$fpkm1 + hg_cont$fpkm2 + hg_cont$fpkm3 + hg_cont$fpkm4) / 4
+
+# fit a linear model chromatin ~ gc + fpkm
+summary(lm(atac1 ~ gc + meanFPKM + gc:meanFPKM, data = hg_cont))
+summary(lm(atac2 ~ gc + meanFPKM + gc:meanFPKM, data = hg_cont))
+summary(lm(atac3 ~ gc + meanFPKM + gc:meanFPKM, data = hg_cont))
+summary(lm(atac4 ~ gc + meanFPKM + gc:meanFPKM, data = hg_cont))
+summary(lm(dnase ~ gc + meanFPKM + gc:meanFPKM, data = hg_cont))
+
+# select genes with high FPKM and low GC as potential candidates for genes with a similar chromatin state marking as milk protein genes
+hgc_interest <- subset(hg_cont, meanFPKM >= 500)
+hgc_interest <- subset(hgc_interest, gc < 44)
+summary(hgc_interest)
+
+hgc_exp <- subset(hg_cont, meanFPKM >= 1)
+selected_rows <- hgc_exp[sample(length(row.names(hgc_exp)),
+                               length(row.names(hgc_interest)), replace = TRUE),]
+selected_meanGC <- mean(selected_rows$gc)
+selected_meanATAC1 <- mean(selected_rows$atac1)
+selected_meanATAC2 <- mean(selected_rows$atac2)
+selected_meanATAC3 <- mean(selected_rows$atac3)
+selected_meanATAC4 <- mean(selected_rows$atac4)
+selected_meanDNase <- mean(selected_rows$dnase)
+
+for (i in 1:999) {
+  selected_rows <- hgc_exp[sample(length(row.names(hgc_exp)),
+                                 length(row.names(hgc_interest)), replace = TRUE),]
+  selected_meanGC <- append(selected_meanGC, mean(selected_rows$gc))
+  selected_meanATAC1 <- append(selected_meanATAC1, mean(selected_rows$atac1))
+  selected_meanATAC2 <- append(selected_meanATAC2, mean(selected_rows$atac2))
+  selected_meanATAC3 <- append(selected_meanATAC3, mean(selected_rows$atac3))
+  selected_meanATAC4 <- append(selected_meanATAC4, mean(selected_rows$atac4))
+  selected_meanDNase <- append(selected_meanDNase, mean(selected_rows$dnase))
+}
+
+subsample_gc_atac <- data.frame(gc = selected_meanGC,
+                                atac1 = selected_meanATAC1,
+                                atac2 = selected_meanATAC2,
+                                atac3 = selected_meanATAC3,
+                                atac4 = selected_meanATAC4,
+                                dnase = selected_meanDNase)
+
+subsample_atac_melt <- melt(subsample_gc_atac[,c("atac1","atac2","atac3","atac4","dnase")],
+                            variable.name = "library",
+                            value.name = "mean_coverage")
+
+ggplot(data = subsample_atac_melt, aes(x = mean_coverage, color = library)) +
+  stat_ecdf() +
+  geom_vline(xintercept = mean(hgc_interest$atac1), color = "red") +
+  geom_vline(xintercept = mean(hgc_interest$atac2), color = "blue") +
+  geom_vline(xintercept = mean(hgc_interest$atac3), color = "orange") +
+  geom_vline(xintercept = mean(hgc_interest$atac4), color = "yellow") +
+  geom_vline(xintercept = mean(hgc_interest$dnase))
+
+```
+
+##Human cell line data (categorical)
+```{r}
+hg_disc <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/hg38_gc_fpkm_atac_discrete.txt", sep = "\t", header = TRUE)
+
+hg_disc$meanFPKM <- (hg_disc$fpkm1 + hg_disc$fpkm2 + hg_disc$fpkm3 + hg_disc$fpkm4) / 4
+
+# frequency of peak calls (all genes)
+summary(hg_disc[,c("atac1", "atac2", "atac3", "atac4")])
+# frequency of peak calls (expressed genes)
+hgd_exp <- subset(hg_disc, meanFPKM >= 1)
+summary(hgd_exp[,c("atac1", "atac2", "atac3", "atac4")])
+
+# fit a (binomial) linear model chromatin ~ cpgi + fpkm
+summary(glm(atac1 ~ cpgi + meanFPKM + cpgi:meanFPKM, data = hg_disc, family = "binomial"))
+summary(glm(atac2 ~ cpgi + meanFPKM + cpgi:meanFPKM, data = hg_disc, family = "binomial"))
+summary(glm(atac3 ~ cpgi + meanFPKM + cpgi:meanFPKM, data = hg_disc, family = "binomial"))
+summary(glm(atac4 ~ cpgi + meanFPKM + cpgi:meanFPKM, data = hg_disc, family = "binomial"))
+
+# odds ratio
+factor_frame <- hg_disc
+factor_frame$atac1 <- as.factor(factor_frame$atac1)
+factor_frame$atac2 <- as.factor(factor_frame$atac2)
+factor_frame$atac3 <- as.factor(factor_frame$atac3)
+factor_frame$atac4 <- as.factor(factor_frame$atac4)
+factor_frame$expressed <- ifelse(factor_frame$meanFPKM >= 1, "FPKM >= 1", "FPKM < 1")
+factor_frame$cpgisland <- ifelse(factor_frame$cpgi == 1, "CpGI+", "CpGI-")
+factor_frame <- factor_frame[,c("cpgisland", "expressed", "atac1", "atac2", "atac3", "atac4")]
+
+atac1_table <- table(factor_frame$atac1, factor_frame$cpgisland, factor_frame$expressed)
+dimnames(atac1_table) <- list(ATAC = c("ATAC-", "ATAC+"),
+                              CpGI = c("CpGI-", "CpGI+"),
+                              FPKM = c("FPKM < 1", "FPKM >= 1"))
+# effect of CpG island on presence of ATAC peak, mean FPKM < 1
+(atac1_table[2,2,1] / (atac1_table[1,2,1] + atac1_table[2,2,1])) / (atac1_table[2,1,1] / (atac1_table[1,1,1] + atac1_table[2,1,1]))
+# effect of CpG island on presence of ATAC peak, mean FPKM >= 1
+(atac1_table[2,2,2] / (atac1_table[1,2,2] + atac1_table[2,2,2])) / (atac1_table[2,1,2] / (atac1_table[1,1,2] + atac1_table[2,1,2]))
+
+## Are ATAC and CpGI independent, given FPKM >= 1?
+chisq.test(atac1_table[,,2])
+## Are ATAC and CpGI independent, given FPKM < 1?
+chisq.test(atac1_table[,,1])
+## Are ATAC and FPKM independent, given CpGI+?
+chisq.test(atac1_table[,2,])
+## Are ATAC and FPKM independent, given CpGI-?
+chisq.test(atac1_table[,1,])
+
+atac2_table <- table(factor_frame$atac2, factor_frame$cpgisland, factor_frame$expressed)
+dimnames(atac2_table) <- list(ATAC = c("ATAC-", "ATAC+"),
+                              CpGI = c("CpGI-", "CpGI+"),
+                              FPKM = c("FPKM < 1", "FPKM >= 1"))
+
+(atac2_table[2,2,1] / (atac2_table[1,2,1] + atac2_table[2,2,1])) / (atac2_table[2,1,1] / (atac2_table[1,1,1] + atac2_table[2,1,1]))
+(atac2_table[2,2,2] / (atac2_table[1,2,2] + atac2_table[2,2,2])) / (atac2_table[2,1,2] / (atac2_table[1,1,2] + atac2_table[2,1,2]))
+## Are ATAC and CpGI independent, given FPKM >= 1?
+chisq.test(atac2_table[,,2])
+## Are ATAC and CpGI independent, given FPKM < 1?
+chisq.test(atac2_table[,,1])
+## Are ATAC and FPKM independent, given CpGI+?
+chisq.test(atac2_table[,2,])
+## Are ATAC and FPKM independent, given CpGI-?
+chisq.test(atac2_table[,1,])
+
+atac3_table <- table(factor_frame$atac3, factor_frame$cpgisland, factor_frame$expressed)
+dimnames(atac3_table) <- list(ATAC = c("ATAC-", "ATAC+"),
+                              CpGI = c("CpGI-", "CpGI+"),
+                              FPKM = c("FPKM < 1", "FPKM >= 1"))
+
+(atac3_table[2,2,1] / (atac3_table[1,2,1] + atac3_table[2,2,1])) / (atac3_table[2,1,1] / (atac3_table[1,1,1] + atac3_table[2,1,1]))
+(atac3_table[2,2,2] / (atac3_table[1,2,2] + atac3_table[2,2,2])) / (atac3_table[2,1,2] / (atac3_table[1,1,2] + atac3_table[2,1,2]))
+
+## Are ATAC and CpGI independent, given FPKM >= 1?
+chisq.test(atac3_table[,,2])
+## Are ATAC and CpGI independent, given FPKM < 1?
+chisq.test(atac3_table[,,1])
+## Are ATAC and FPKM independent, given CpGI+?
+chisq.test(atac3_table[,2,])
+## Are ATAC and FPKM independent, given CpGI-?
+chisq.test(atac3_table[,1,])
+
+atac4_table <- table(factor_frame$atac4, factor_frame$cpgisland, factor_frame$expressed)
+dimnames(atac4_table) <- list(ATAC = c("ATAC-", "ATAC+"),
+                              CpGI = c("CpGI-", "CpGI+"),
+                              FPKM = c("FPKM < 1", "FPKM >= 1"))
+
+(atac4_table[2,2,1] / (atac4_table[1,2,1] + atac4_table[2,2,1])) / (atac4_table[2,1,1] / (atac4_table[1,1,1] + atac4_table[2,1,1]))
+(atac4_table[2,2,2] / (atac4_table[1,2,2] + atac4_table[2,2,2])) / (atac4_table[2,1,2] / (atac4_table[1,1,2] + atac4_table[2,1,2]))
+
+## Are ATAC and CpGI independent, given FPKM >= 1?
+chisq.test(atac4_table[,,2])
+## Are ATAC and CpGI independent, given FPKM < 1?
+chisq.test(atac4_table[,,1])
+## Are ATAC and FPKM independent, given CpGI+?
+chisq.test(atac4_table[,2,])
+## Are ATAC and FPKM independent, given CpGI-?
+chisq.test(atac4_table[,1,])
+
+# frequency of peak calls (highly expressed genes)
+hgd_interest <- subset(hg_disc, meanFPKM >= 500)
+summary(hgd_interest[,c("atac1", "atac2", "atac3", "atac4")])
+# frequency of peak calls (highly expressed genes without CpG islands)
+hgd_interest <- subset(hgd_interest, cpgi == 0)
+summary(hgd_interest[,c("atac1", "atac2", "atac3", "atac4")])
+
+# plot ATAC and GC of genes of interest relative to other expressed genes
+selected_rows <- hgd_exp[sample(length(row.names(hgd_exp)),
+                               length(row.names(hgd_interest)), replace = TRUE),]
+selected_countCpG <- sum(selected_rows$cpgi)
+selected_countATAC1 <- sum(selected_rows$atac1)
+selected_countATAC2 <- sum(selected_rows$atac2)
+selected_countATAC3 <- sum(selected_rows$atac3)
+selected_countATAC4 <- sum(selected_rows$atac4)
+
+for (i in 1:999) {
+  selected_rows <- hgd_exp[sample(length(row.names(hgd_exp)),
+                                 length(row.names(hgd_interest)), replace = TRUE),]
+  selected_countCpG <- append(selected_countCpG, sum(selected_rows$cpgi))
+  selected_countATAC1 <- append(selected_countATAC1, sum(selected_rows$atac1))
+  selected_countATAC2 <- append(selected_countATAC2, sum(selected_rows$atac2))
+  selected_countATAC3 <- append(selected_countATAC3, sum(selected_rows$atac3))
+  selected_countATAC4 <- append(selected_countATAC4, sum(selected_rows$atac4))
+}
+
+subsample_gc_atac <- data.frame(gc = selected_countCpG,
+                                atac1 = selected_countATAC1,
+                                atac2 = selected_countATAC2,
+                                atac3 = selected_countATAC3,
+                                atac4 = selected_countATAC4)
+
+subsample_atac_melt <- melt(subsample_gc_atac[,c("atac1","atac2","atac3","atac4")],
+                            variable.name = "library",
+                            value.name = "peak_count")
+
+ggplot(data = subsample_atac_melt, aes(x = peak_count, color = library)) +
+  stat_ecdf() +
+  scale_color_brewer(palette = "Set3") +
+  geom_vline(xintercept = sum(hgd_interest$atac1), color = "#8dd3c7") +
+  geom_vline(xintercept = sum(hgd_interest$atac2), color = "#ffffb3") +
+  geom_vline(xintercept = sum(hgd_interest$atac3), color = "#bebada") +
+  geom_vline(xintercept = sum(hgd_interest$atac4), color = "#fb8072") +
+  labs(x = "peak count in group", y = "fraction of groups with x or fewer peaks", color = "Library")
+
+
+```
+
+##Lactating bovine Mammary Epithelial Cells (continuous)
+```{r}
+L468_cont <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/L468_gc_fpkm_atac_continuous.txt", sep = "\t", header = TRUE)
+
+# genes that are not expressed have lower GC than genes that are
+t.test(L468_cont[which(L468_cont$fpkm < 1), "gc"],
+       L468_cont[which(L468_cont$fpkm >= 1), "gc"])
+
+# fit a linear model atac ~ gc + fpkm
+summary(lm(atac ~ gc + fpkm + gc:fpkm, data = L468_cont))
+
+# load in genes of interest 
+milk <- data.frame(gid = c("ENSBTAG00000007695", "ENSBTAG00000005005",
+                           "ENSBTAG00000002632", "ENSBTAG00000039787",
+                           "ENSBTAG00000005859", "ENSBTAG00000001292",
+                           "ENSBTAG00000013417"),
+                   name = c("CSN1S1", "CSN1S2",
+                            "CSN2", "CSN3",
+                            "LALBA", "LF",
+                            "GLYCAM1"))
+milk_interest <- L468_cont[which(L468_cont$gid %in% milk$gid),]
+milk_interest <- merge(milk, milk_interest)
+
+# scatterplot with genes of interest and linear model atac ~ gc
+point_lm_milk <- ggplot() +
+  geom_point(data = L468_cont, aes(x = gc, y = atac)) +
+  geom_smooth(data = L468_cont, aes(x = gc, y = atac), method = "lm", se = FALSE) +
+  geom_point(data = milk_interest, aes(x = gc, y = atac, color = name)) +
+  scale_color_brewer(palette = "Set3") +
+  labs(x = "% GC", y = "ATAC-Seq coverage", colour = "")
+
+# geom_hex showing the count of genes in each hexagonal bin
+hex_count <- ggplot(data = L468_cont, aes(x = gc, y = atac)) +
+  geom_hex() +
+  scale_fill_distiller(palette = "GnBu") +
+  labs(x = "% GC", y = "ATAC-Seq coverage")
+
+# stat_summary_hex showing the mean fpkm of data in each hexagonal bin
+hex_fpkm <- ggplot(data = L468_cont, aes(x = gc, y = atac, z = fpkm)) +
+  stat_summary_hex(fun = "mean") + scale_fill_distiller(palette = "RdPu") +
+  labs(x = "% GC", y= "ATAC-Seq coverage", fill = "FPKM")
+
+# stat_summary_hex showing mean fpkm of data in hex bins, plus density contour and genes of interest
+hex_layered <- hex_fpkm + geom_density_2d(color = "white") +
+  geom_point(data = milk_interest, aes(x = gc, y = atac))
+
+# box plots showing GC, FPKM and ATAC coverage with genes of interest picked out
+L468c_box <- L468_cont[,c("gid", "atac", "fpkm", "gc")]
+L468c_box$box <- "box"
+milk_interest$box <- "box"
+
+atac_box <- ggplot() +
+  geom_boxplot(data = L468c_box, aes(x = box, y = atac)) +
+  geom_jitter(data = milk_interest, aes(x = box, y = atac, color = name), height = 0, width = 0.25) +
+  labs(x = "", y = "ATAC-seq coverage", color = "") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  scale_color_brewer(palette = "Set3")
+
+gc_box <- ggplot() +
+  geom_boxplot(data = L468c_box, aes(x = box, y = gc)) +
+  geom_jitter(data = milk_interest, aes(x = box, y = gc, color = name), height = 0, width = 0.25) +
+  labs(x = "", y = "% GC", color = "") +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
+  coord_flip() +
+  scale_color_brewer(palette = "Set3")
+
+point_lm_milk
+hex_count
+hex_layered
+
+# compare milk protein genes to randomly selected sets of genes equal to the number of genes of interest
+lc_exp <- subset(L468_cont, fpkm >= 1)
+
+selected_rows <- lc_exp[sample(length(row.names(lc_exp)),
+                               length(row.names(milk_interest)), replace = TRUE),]
+selected_meanGC <- mean(selected_rows$gc)
+selected_meanATAC <- mean(selected_rows$atac)
+
+for (i in 1:999) {
+  selected_rows <- lc_exp[sample(length(row.names(lc_exp)),
+                                 length(row.names(milk_interest)), replace = TRUE),]
+  selected_meanGC <- append(selected_meanGC, mean(selected_rows$gc))
+  selected_meanATAC <- append(selected_meanATAC, mean(selected_rows$atac))
+}
+
+subsample_gc_atac <- data.frame(mean_gc = selected_meanGC, mean_atac = selected_meanATAC)
+
+ggplot(data = subsample_gc_atac, aes(x = mean_atac)) + stat_ecdf() +
+  geom_vline(xintercept = mean(milk_interest$atac))
+
+ggplot(data = subsample_gc_atac, aes(x = mean_gc)) + stat_ecdf() +
+  geom_vline(xintercept = mean(milk_interest$gc))
+```
+
+##Lactating bovine mammary epithelial cells (discrete)
+```{r}
+L468_disc <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/L468_gc_fpkm_atac_discrete.txt", sep = "\t", header = TRUE)
+
+L468_disc$ATAC_status <- ifelse(L468_disc$atac == 1, "ATAC+", "ATAC-")
+L468_disc$CpGI_status <- ifelse(L468_disc$cpgi == 1, "CpGI+", "CpGI-")
+L468_disc$FPKM_status <- ifelse(L468_disc$fpkm >= 1, "FPKM >= 1", "FPKM < 1")
+
+# fit binomial model atac ~ CpGI_status + FPKM_status
+summary(glm(atac ~ CpGI_status + FPKM_status + CpGI_status:FPKM_status, data = L468_disc, family = "binomial"))
+
+
+ld_table <- table(L468_disc$ATAC_status, L468_disc$CpGI_status, L468_disc$FPKM_status)
+dimnames(ld_table) <- list(ATAC = c("ATAC-", "ATAC+"),
+                      CpGI = c("CpGI-", "CpGI+"),
+                      FPKM = c("FPKM < 1", "FPKM >= 1"))
+
+# odds ratio
+# effect of CpG island on presence of ATAC peak, mean FPKM < 1
+(ld_table[2,2,1] / (ld_table[1,2,1] + ld_table[2,2,1])) / (ld_table[2,1,1] / (ld_table[1,1,1] + ld_table[2,1,1]))
+# effect of CpG island on presence of ATAC peak, mean FPKM >= 1
+(ld_table[2,2,2] / (ld_table[1,2,2] + ld_table[2,2,2])) / (ld_table[2,1,2] / (ld_table[1,1,2] + ld_table[2,1,2]))
+
+# Chi squared tests for independence
+## Are ATAC and CpGI independent, given FPKM >= 1?
+chisq.test(ld_table[,,2])
+## Are ATAC and CpGI independent, given FPKM < 1?
+chisq.test(ld_table[,,1])
+## Are ATAC and FPKM independent, given CpGI+?
+chisq.test(ld_table[,2,])
+## Are ATAC and FPKM independent, given CpGI-?
+chisq.test(ld_table[,1,])
+
+# create data frame containing genes of interest only
+milk_interest <- L468_disc[which(L468_disc$gid %in% milk$gid),]
+milk_interest <- merge(milk, milk_interest)
+
+# randomly select a number of genes equal to the number of genes of interest
+L468_expressed <- subset(L468_disc, FPKM_status == "FPKM >= 1")
+
+selected_rows <- L468_expressed[sample(length(row.names(L468_expressed)),
+                                       length(row.names(milk_interest)), replace = TRUE),]
+selected_cpgi <- sum(selected_rows$cpgi)
+selected_atac <- sum(selected_rows$atac)
+
+for (i in 1:999) {
+  selected_rows <- L468_expressed[sample(length(row.names(L468_expressed)),
+                                         length(row.names(milk_interest)), replace = TRUE),]
+  selected_cpgi <- append(selected_cpgi, sum(selected_rows$cpgi))
+  selected_atac <- append(selected_atac, sum(selected_rows$atac))
+}
+
+subsample_gc_atac <- data.frame(cpgi_count = selected_cpgi, atac_count = selected_atac)
+summary(subsample_gc_atac)
+
+ggplot(data = subsample_gc_atac, aes(x = atac_count)) + geom_bar() + geom_vline(xintercept = sum(milk_interest$atac))
+
+ggplot(data = subsample_gc_atac, aes(x = cpgi_count)) + geom_bar() + geom_vline(xintercept = sum(milk_interest$cpgi))
+table(subsample_gc_atac)
+```
+
+##Virgin bovine mammary epithelial cells (continuous)
+```{r}
+lib08_cont <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/lib08_V468_gc_fpkm_atac_continuous.txt", sep = "\t", header = TRUE)
+
+# genes that are not expressed have lower GC than genes that are
+t.test(lib08_cont[which(lib08_cont$fpkm < 1), "gc"],
+       lib08_cont[which(lib08_cont$fpkm >= 1), "gc"])
+
+# highly expressed genes with low GC vs all expressed genes
+lib08c_exp <- subset(lib08_cont, fpkm >= 1)
+lib08c_interest <- subset(lib08_cont, fpkm >= 500 & gc < 44)
+t.test(lib08c_interest$atac, lib08c_exp$atac)
+
+# fit a linear model atac ~ gc + fpkm
+summary(lm(atac ~ gc + fpkm + gc:fpkm, data = lib08_cont))
+
+# scatterplot with genes of interest and linear model atac ~ gc
+lib08c_point <- ggplot() +
+  geom_point(data = lib08_cont, aes(x = gc, y = atac)) +
+  geom_smooth(data = lib08_cont, aes(x = gc, y = atac), method = "lm", se = FALSE) +
+  labs(x = "% GC", y = "ATAC-Seq coverage", colour = "")
+
+# geom_hex showing the count of genes in each hexagonal bin
+hex_count <- ggplot(data = lib08_cont, aes(x = gc, y = atac)) +
+  geom_hex() +
+  scale_fill_distiller(palette = "GnBu") +
+  labs(x = "% GC", y = "ATAC-Seq coverage")
+
+# stat_summary_hex showing the mean fpkm of data in each hexagonal bin
+hex_fpkm <- ggplot(data = lib08_cont, aes(x = gc, y = atac, z = fpkm)) +
+  stat_summary_hex(fun = "mean") + scale_fill_distiller(palette = "RdPu") +
+  labs(x = "% GC", y= "ATAC-Seq coverage", fill = "FPKM")
+
+# stat_summary_hex showing mean fpkm of data in hex bins, plus density contour and genes of interest
+hex_layered <- hex_fpkm + geom_density_2d(color = "white")
+
+lib08c_point +  coord_cartesian(ylim = c(0, 50))
+hex_count + coord_cartesian(ylim = c(-10, 100))
+hex_layered + coord_cartesian(ylim = c(-10, 100))
+
+# compare milk protein genes to randomly selected sets of genes equal to the number of genes of interest
+lc_exp <- subset(lib08_cont, fpkm >= 1)
+
+selected_rows <- lc_exp[sample(length(row.names(lc_exp)),
+                               length(row.names(lib08c_interest)), replace = TRUE),]
+selected_meanGC <- mean(selected_rows$gc)
+selected_meanATAC <- mean(selected_rows$atac)
+
+for (i in 1:999) {
+  selected_rows <- lc_exp[sample(length(row.names(lc_exp)),
+                                 length(row.names(lib08c_interest)), replace = TRUE),]
+  selected_meanGC <- append(selected_meanGC, mean(selected_rows$gc))
+  selected_meanATAC <- append(selected_meanATAC, mean(selected_rows$atac))
+}
+
+subsample_gc_atac <- data.frame(mean_gc = selected_meanGC, mean_atac = selected_meanATAC)
+
+ggplot(data = subsample_gc_atac, aes(x = mean_atac)) + stat_ecdf() + geom_vline(xintercept = mean(lib08c_interest$atac))
+
+```
+
+##Virgin bovine mammary epithelial cells (discrete)
+```{r}
+lib08_disc <- read.table(file = "~/Documents/UC_Davis_IGG/dissertation/ATAC/lib08_V468_gc_fpkm_atac_discrete.txt", sep = "\t", header = TRUE)
+
+lib08_disc$ATAC_status <- ifelse(lib08_disc$atac == 1, "ATAC+", "ATAC-")
+lib08_disc$CpGI_status <- ifelse(lib08_disc$cpgi == 1, "CpGI+", "CpGI-")
+lib08_disc$FPKM_status <- ifelse(lib08_disc$fpkm >= 1, "FPKM >= 1", "FPKM < 1")
+
+# fit binomial model atac ~ CpGI_status + FPKM_status
+summary(glm(atac ~ CpGI_status + FPKM_status + CpGI_status:FPKM_status, data = lib08_disc, family = "binomial"))
+
+
+ld_table <- table(lib08_disc$ATAC_status, lib08_disc$CpGI_status, lib08_disc$FPKM_status)
+dimnames(ld_table) <- list(ATAC = c("ATAC-", "ATAC+"),
+                      CpGI = c("CpGI-", "CpGI+"),
+                      FPKM = c("FPKM < 1", "FPKM >= 1"))
+
+# odds ratio
+# effect of CpG island on presence of ATAC peak, mean FPKM < 1
+(ld_table[2,2,1] / (ld_table[1,2,1] + ld_table[2,2,1])) / (ld_table[2,1,1] / (ld_table[1,1,1] + ld_table[2,1,1]))
+# effect of CpG island on presence of ATAC peak, mean FPKM >= 1
+(ld_table[2,2,2] / (ld_table[1,2,2] + ld_table[2,2,2])) / (ld_table[2,1,2] / (ld_table[1,1,2] + ld_table[2,1,2]))
+
+# Chi squared tests for independence
+## Are ATAC and CpGI independent, given FPKM >= 1?
+chisq.test(ld_table[,,2])
+## Are ATAC and CpGI independent, given FPKM < 1?
+chisq.test(ld_table[,,1])
+## Are ATAC and FPKM independent, given CpGI+?
+chisq.test(ld_table[,2,])
+## Are ATAC and FPKM independent, given CpGI-?
+chisq.test(ld_table[,1,])
+
+# genes of interest
+lib08d_interest <- subset(lib08_disc, CpGI_status == "CpGI-" & fpkm >= 500)
+
+# randomly select a number of genes equal to the number of genes of interest
+lib08_expressed <- subset(lib08_disc, FPKM_status == "FPKM >= 1")
+
+selected_rows <- lib08_expressed[sample(length(row.names(lib08_expressed)),
+                                        length(row.names(lib08d_interest)), replace = TRUE),]
+selected_cpgi <- sum(selected_rows$cpgi)
+selected_atac <- sum(selected_rows$atac)
+
+for (i in 1:999) {
+  selected_rows <- lib08_expressed[sample(length(row.names(lib08_expressed)),
+                                          length(row.names(lib08d_interest)), replace = TRUE),]
+  selected_cpgi <- append(selected_cpgi, sum(selected_rows$cpgi))
+  selected_atac <- append(selected_atac, sum(selected_rows$atac))
+}
+
+subsample_gc_atac <- data.frame(cpgi_count = selected_cpgi, atac_count = selected_atac)
+summary(subsample_gc_atac)
+
+ggplot(data = subsample_gc_atac, aes(x = atac_count)) + stat_ecdf() + geom_vline(xintercept = sum(lib08d_interest$atac))
+
+
+```
+
+##Composite figures with cowplot 
+```{r}
+library(cowplot)
+
+p1 <- atac_box +
+  theme(legend.position = "none",
+                       axis.title.x = element_blank(),
+                       axis.text.x = element_blank()) +
+  coord_cartesian(ylim = c(0, 40))
+p2 <- point_lm_milk + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank()) +
+  coord_cartesian(ylim = c(0, 40))
+p3 <- gc_box + theme(legend.position = "bottom")
+
+plot_grid(p1, p2, NULL, p3, align = "v", nrow = 2, ncol = 2, rel_widths = c(1,5), rel_heights = c(4,1))
+
+```
+
